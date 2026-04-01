@@ -105,8 +105,12 @@
 | `speaker_id` | string | 稳定 ID，如 `char_lin_wan` |
 | `speaker_slug` | string | 与 `novel-tts-design.md` 11.4 命名一致 |
 | `display_name` | string | 原著展示名 |
+| `aliases` | string[]? | 别名列表（v2.0 新增，详见 `auto-character-voice-engine.md` §2.1） |
 | `role_type` | enum | `narrator` / `character` / `inner_voice` / `system`（系统音、章节头等） |
+| `role_level` | enum? | `protagonist` / `supporting` / `minor` / `extra`（v2.0 新增，详见 `auto-character-voice-engine.md` §2.1） |
+| `profile` | object? | 角色画像：性别、年龄、职业、性格等（v2.0 新增，详见 `auto-character-voice-engine.md` §2.2） |
 | `voice_ref` | string? | 参考音频路径或引擎内音色 key |
+| `voice_description` | string? | 自然语言音色描述，用于 VoiceDesign（v2.0 新增） |
 | `notes` | string? | 声线人设：年龄感、方言、语速建议 |
 
 **旁白**必须有一条 `role_type: narrator`，`speaker_slug` 如 `narrator`。
@@ -131,6 +135,8 @@
 | `text` | string | **送入 TTS 的最终文本**（已做听感处理） |
 | `source_excerpt` | string? | 可选：对应原文片段，便于 diff |
 | `emotion` | string | `happy` / `sad` / … 与 `EmotionType` 一致 |
+| `emotion_detail` | object? | 精细情感控制：primary、secondary、intensity、valence、arousal、tts_instruct（v2.0 新增，详见 `auto-character-voice-engine.md` §4.4） |
+| `paraverbals` | array? | 语气词/副语言列表：笑声、叹气、喘息等（v2.0 新增，详见 `auto-character-voice-engine.md` §5.3） |
 | `pause_after_ms` | int? | 句后停顿建议（下游可映射静音） |
 | `ssml_hints` | object? | 可选：`emphasis_words`, `break_ms`（若引擎支持） |
 | `sfx_placeholder` | string? | 如 `door_knock`，无则省略 |
@@ -287,5 +293,12 @@
 
 ## 11. 延伸阅读
 
-- 系统架构与 TTS：`doc/novel-tts-design.md`
-- 部署：`doc/index-tts-vllm-deployment.md`
+| 文档 | 说明 |
+|------|------|
+| [`novel-tts-design.md`](novel-tts-design.md) | **总纲** — 系统架构、模块索引、数据流 |
+| [`auto-character-voice-engine.md`](auto-character-voice-engine.md) | 角色画像推断、音色自动设计、情感推断、语气词注入、一致性校验 |
+| [`module-emotion-system.md`](module-emotion-system.md) | EmotionType 定义、VAD 模型、TTS 引擎适配 |
+| [`module-voice-bank.md`](module-voice-bank.md) | 音色库管理、自动生成、模板池 |
+| [`module-audio-processor.md`](module-audio-processor.md) | 音频命名规范、合并、后处理 |
+| [`module-task-manager.md`](module-task-manager.md) | 任务 DAG 调度、进度追踪、断点续传 |
+| [`index-tts-vllm-deployment.md`](index-tts-vllm-deployment.md) | Windows TTS 服务端部署 |

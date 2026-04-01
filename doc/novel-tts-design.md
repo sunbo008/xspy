@@ -1,863 +1,544 @@
-# 小说 TTS 配音系统设计方案
+# 小说 TTS 配音系统设计方案（总纲）
 
-## 📋 1. 系统架构
-
-```
-┌─────────────────────────────────────────────────────────────────┐
-│                        小说 TTS 配音系统                           │
-├─────────────────────────────────────────────────────────────────┤
-│                                                                 │
-│  ┌──────────────┐     ┌──────────────┐     ┌──────────────┐   │
-│  │   Mac OpenClaw│────▶│  Windows API │────▶│  RTX 3070 Ti  │   │
-│  │   (客户端)    │     │  (中间层)    │     │  (推理引擎)  │   │
-│  └──────────────┘     └──────────────┘     └──────────────┘   │
-│                                                                 │
-└─────────────────────────────────────────────────────────────────┘
-```
+> 本文档是系统的**顶层设计总纲**，定义整体架构、模块划分、数据流。
+> 每个模块的详细实现、接口定义、代码示例均在各自的专属文档中，请通过下方索引跳转。
 
 ---
 
-## 🎯 2. 系统组件
-
-### 2.1 客户端（Mac OpenClaw）
-
-**职责：**
-- 小说文件管理（读取、解析、章节分割）
-- 任务调度（批量配音任务队列）
-- 音频合成请求（调用 Windows API）
-- 音频文件管理（保存、索引、合并）
-
-**技术栈：**
-- Python + OpenClaw 集成
-- 文本解析：`epublib3`, `PyPDF2`
-- 音频处理：`pydub`
-
-### 2.2 服务端（Windows PC）
-
-**职责：**
-- 提供 TTS API 服务
-- GPU 推理加速
-- 请求队列管理
-
-**技术栈：**
-- FastAPI
-- vLLM + Index-TTS
-- RTX 3070 Ti (8GB 显存)
-
----
-
-## 🏗️ 3. 详细设计
-
-### 3.1 客户端架构
+## 1. 系统架构
 
 ```
-小说配音客户端/
-├── config.py              # 配置文件
-├──小说解析器/
-│   ├── __init__.py
-│   ├── txt_parser.py      # TXT 文件解析
-│   ├── epub_parser.py     # EPUB 文件解析
-│   └── pdf_parser.py      # PDF 文件解析
-├──章节分割器/
-│   ├── __init__.py
-│   └── chapter_splitter.py # 按章节分割文本
-├── TTS 客户端/
-│   ├── __init__.py
-│   ├── api_client.py      # API 调用客户端
-│   └── retry_manager.py   # 重试机制
-├── 音频处理器/
-│   ├── __init__.py
-│   ├── audio_generator.py # 音频生成器
-│   └── audio_merger.py    # 音频合并器
-├── 任务管理器/
-│   ├── __init__.py
-│   └── task_queue.py      # 任务队列管理
-├── main.py                # 主程序入口
-└── cli.py                 # 命令行工具
+┌───────────────────────────────────────────────────────────────────────────┐
+│                          小说 TTS 全自动配音系统                            │
+├───────────────────────────────────────────────────────────────────────────┤
+│                                                                           │
+│  Mac 客户端 (M5 Pro 64GB)                     Windows 服务端 (RTX 3070 Ti)│
+│  ┌─────────────────────────────────┐          ┌────────────────────────┐ │
+│  │  Web UI (Vue 3 + FastAPI)       │          │  TTS API 服务           │ │
+│  │  ┌───────────────────────────┐  │          │  ┌──────────────────┐  │ │
+│  │  │ 小说解析器                 │  │          │  │ Index-TTS vLLM   │  │ │
+│  │  │ 编剧 Agent (Qwen3.5 LLM) │  │  HTTP    │  │ Qwen3-TTS vLLM   │  │ │
+│  │  │ 角色分析引擎               │  │ ──────▶  │  │ FastAPI 封装      │  │ │
+│  │  │ 任务管理器                 │  │          │  └──────────────────┘  │ │
+│  │  │ 音频处理器                 │  │          │  GPU 推理加速          │ │
+│  │  └───────────────────────────┘  │          └────────────────────────┘ │
+│  └─────────────────────────────────┘                                     │
+│                                                                           │
+└───────────────────────────────────────────────────────────────────────────┘
 ```
 
-### 3.2 服务端架构
+### 1.1 硬件部署
 
-```
-Windows 服务端/
-├── api_server.py          # Index-TTS 1.0/1.5 API
-├── api_server_v2.py       # IndexTTS-2 API
-├── config.py              # 服务端配置
-└── requirements.txt       # 依赖
-```
-
----
-
-## 📦 4. 技术选型
-
-### 4.1 文本解析
-
-| 格式 | 库 | 说明 |
-|------|-----|------|
-| TXT | `io` (内置) | 直接读取 |
-| EPUB | `epublib3` | 支持 EPUB3 |
-| PDF | `PyPDF2` | 基础 PDF 解析 |
-
-### 4.2 TTS 引擎
-
-| 引擎 | 优势 | 劣势 |
+| 节点 | 硬件 | 职责 |
 |------|------|------|
-| **Index-TTS 1.5** | 中文优化，质量高 | 需要 GPU |
-| **IndexTTS-2** | 最新，多语言 | 更重，需要更多显存 |
+| Mac 客户端 | M5 Pro / 64GB 统一内存 | LLM 推理（Qwen3.5-35B via mlx_lm）、任务调度、Web UI、音频处理 |
+| Windows 服务端 | RTX 3070 Ti / 8GB VRAM | TTS 推理（Index-TTS / Qwen3-TTS via vLLM） |
 
-### 4.3 音频处理
+### 1.2 通信方式
 
-| 库 | 用途 |
-|-----|------|
-| `pydub` | 音频剪辑、合并、格式转换 |
-| `ffmpeg` | 底层音频处理 |
+- Mac → Windows：HTTP REST API（局域网，延迟 <1ms）
+- 前端 → 后端：REST API + WebSocket（进度推送）
 
 ---
 
-## 💻 5. 实现方案
+## 2. 功能全景
 
-### 5.1 客户端实现
+本系统包含以下**全部功能**（非后续优化，均为本期开发范围）：
 
-#### 配置文件 (config.py)
-
-```python
-from dataclasses import dataclass
-from typing import Optional
-
-@dataclass
-class ServerConfig:
-    """服务端配置"""
-    host: str = "192.168.x.x"  # Windows 局域网 IP
-    port: int = 6006
-    model_version: str = "1.5"  # 1.0, 1.5, or 2
-
-@dataclass
-class TTSConfig:
-    """TTS 配置"""
-    output_format: str = "mp3"
-    sample_rate: int = 22050
-    batch_size: int = 10  # 批量处理大小
-
-@dataclass
-class AppConfig:
-    """应用配置"""
-    server: ServerConfig = None
-    tts: TTSConfig = None
-    output_dir: str = "output"
-    
-    def __post_init__(self):
-        if self.server is None:
-            self.server = ServerConfig()
-        if self.tts is None:
-            self.tts = TTSConfig()
-```
-
-#### 文本解析器 (parsers/txt_parser.py)
-
-```python
-from pathlib import Path
-from typing import Generator, Tuple
-
-class TXTParser:
-    """TXT 文件解析器"""
-    
-    def __init__(self, filepath: Path):
-        self.filepath = filepath
-        self.content = filepath.read_text(encoding='utf-8')
-    
-    def get_chapters(self) -> Generator[Tuple[str, str], None, None]:
-        """按章节分割文本
-        
-        支持以下章节标记：
-        - "第 X 章"
-        - "Chapter X"
-        - "=== 章节名 ==="
-        """
-        import re
-        
-        # 中文章节标记
-        chapter_pattern = r'第 [一二三四五六七八九十百千万 0-9]+[章回节]'
-        
-        matches = list(re.finditer(chapter_pattern, self.content))
-        
-        for i, match in enumerate(matches):
-            start = match.start()
-            end = matches[i + 1].start() if i + 1 < len(matches) else len(self.content)
-            chapter_title = match.group()
-            chapter_text = self.content[start:end].strip()
-            
-            yield chapter_title, chapter_text
-```
-
-#### TTS 客户端 (tts_client/api_client.py)
-
-```python
-import requests
-import json
-from typing import Optional
-
-class TTSApiClient:
-    """TTS API 客户端"""
-    
-    def __init__(self, base_url: str, model_version: str = "1.5"):
-        self.base_url = base_url.rstrip('/')
-        self.model_version = model_version
-        
-        if model_version == "2":
-            self.endpoint = f"{self.base_url}/api/v2/tts"
-        else:
-            self.endpoint = f"{self.base_url}/api/v{model_version}/tts"
-    
-    def synthesize(self, text: str, output_path: str) -> bool:
-        """合成音频
-        
-        Args:
-            text: 要合成的文本
-            output_path: 输出文件路径
-            
-        Returns:
-            是否成功
-        """
-        try:
-            response = requests.post(
-                self.endpoint,
-                json={
-                    "text": text,
-                    "output_file": output_path
-                },
-                timeout=300  # 长时间超时，因为 TTS 可能需要很久
-            )
-            
-            if response.status_code == 200:
-                return True
-            else:
-                print(f"TTS 失败：{response.status_code}")
-                return False
-                
-        except Exception as e:
-            print(f"TTS 请求失败：{e}")
-            return False
-```
-
-#### 音频生成器 (audio/audio_generator.py)
-
-```python
-from pathlib import Path
-from typing import Generator
-from tts_client.api_client import TTSApiClient
-from config import AppConfig
-
-class AudioGenerator:
-    """音频生成器"""
-    
-    def __init__(self, config: AppConfig):
-        self.config = config
-        self.api_client = TTSApiClient(
-            f"http://{config.server.host}:{config.server.port}",
-            config.server.model_version
-        )
-    
-    def generate_audio(self, chapter_title: str, chapter_text: str) -> str:
-        """生成章节音频
-        
-        Returns:
-            输出文件路径
-        """
-        output_path = Path(self.config.output_dir) / f"{chapter_title}.mp3"
-        
-        if self.api_client.synthesize(chapter_text, str(output_path)):
-            return str(output_path)
-        else:
-            raise Exception(f"音频生成失败：{chapter_title}")
-```
-
-#### 任务管理器 (task_manager/task_queue.py)
-
-```python
-import queue
-import threading
-from typing import Callable, Any
-from pathlib import Path
-
-class TaskQueue:
-    """任务队列管理器"""
-    
-    def __init__(self, max_workers: int = 4):
-        self.task_queue = queue.Queue()
-        self.max_workers = max_workers
-        self.workers = []
-        self._start_workers()
-    
-    def _start_workers(self):
-        """启动工作线程"""
-        for i in range(self.max_workers):
-            worker = threading.Thread(target=self._worker_loop, daemon=True)
-            worker.start()
-            self.workers.append(worker)
-    
-    def _worker_loop(self):
-        """工作线程循环"""
-        while True:
-            task = self.task_queue.get()
-            if task is None:
-                break
-            
-            func, args, kwargs = task
-            try:
-                func(*args, **kwargs)
-            except Exception as e:
-                print(f"任务执行失败：{e}")
-            
-            self.task_queue.task_done()
-    
-    def add_task(self, func: Callable, *args, **kwargs):
-        """添加任务"""
-        self.task_queue.put((func, args, kwargs))
-    
-    def wait_completion(self):
-        """等待所有任务完成"""
-        self.task_queue.join()
-    
-    def shutdown(self):
-        """关闭工作线程"""
-        for _ in range(self.max_workers):
-            self.task_queue.put(None)
-```
-
----
-
-## 🚀 6. 使用示例
-
-### 6.1 命令行使用
-
-```bash
-# 基本使用
-python main.py novel.epub --output output/
-
-# 指定服务端
-python main.py novel.txt --host 192.168.1.100 --port 6006
-
-# 指定版本
-python main.py novel.pdf --version 2
-
-# 批量处理多个文件
-python main.py *.epub --batch
-```
-
-### 6.2 Python API 使用
-
-```python
-from pathlib import Path
-from小说解析器.txt_parser import TXTParser
-from tts_client.api_client import TTSApiClient
-from audio.audio_generator import AudioGenerator
-from task_manager.task_queue import TaskQueue
-from config import AppConfig
-
-# 配置
-config = AppConfig(
-    server=ServerConfig(host="192.168.1.100", port=6006, model_version="1.5"),
-    output_dir="output/"
-)
-
-# 解析小说
-parser = TXTParser(Path("novel.txt"))
-
-# 创建任务队列
-queue = TaskQueue(max_workers=4)
-
-# 创建音频生成器
-generator = AudioGenerator(config)
-
-# 处理每个章节
-for chapter_title, chapter_text in parser.get_chapters():
-    # 添加任务到队列
-    queue.add_task(generator.generate_audio, chapter_title, chapter_text)
-
-# 等待所有任务完成
-queue.wait_completion()
-queue.shutdown()
-
-print("所有章节音频生成完成！")
-```
-
----
-
-## 📋 7. 部署步骤
-
-### 7.1 Windows 服务端部署
-
-1. **安装 WSL2**（如未安装）
-   ```bash
-   wsl --install
-   ```
-
-2. **安装 CUDA 和依赖**
-   ```bash
-   # WSL 内执行
-   conda create -n index-tts-vllm python=3.12 -y
-   conda activate index-tts-vllm
-   pip install uv
-   uv pip install -r requirements.txt -c overrides.txt
-   ```
-
-3. **下载模型权重**
-   ```bash
-   # 下载 Index-TTS 1.5 权重
-   huggingface-cli download ksuriuri/Index-TTS-1.5-vLLM --local-dir ./checkpoints/Index-TTS-1.5-vLLM
-   ```
-
-4. **启动 API 服务**
-   ```bash
-   python api_server.py \
-     --model_dir ./checkpoints/Index-TTS-1.5-vLLM \
-     --host 0.0.0.0 \
-     --port 6006 \
-     --gpu_memory_utilization 0.25
-   ```
-
-### 7.2 Mac 客户端部署
-
-```bash
-# 克隆客户端代码
-git clone https://github.com/your-repo/novel-tts-client.git
-cd novel-tts-client
-
-# 安装依赖
-pip install -r requirements.txt
-
-# 配置服务端 IP
-cp config.example.py config.py
-# 编辑 config.py，设置正确的服务端 IP
-
-# 开始配音
-python main.py novel.epub
-```
-
----
-
-## 🔧 8. 配置说明
-
-### 8.1 服务端配置 (config.py)
-
-```python
-SERVER_CONFIG = {
-    "host": "0.0.0.0",      # 监听地址
-    "port": 6006,           # 端口
-    "gpu_memory_utilization": 0.25,  # GPU 显存占用比例
-}
-```
-
-### 8.2 客户端配置 (config.py)
-
-```python
-SERVER_CONFIG = {
-    "host": "192.168.1.100",  # Windows 局域网 IP
-    "port": 6006,
-    "model_version": "1.5",   # 1.0, 1.5, or 2
-}
-
-TTS_CONFIG = {
-    "output_format": "mp3",
-    "sample_rate": 22050,
-    "batch_size": 10,
-}
-
-OUTPUT_CONFIG = {
-    "output_dir": "output",
-    "file_naming": "{chapter_title}.mp3",
-}
-```
-
----
-
-## 📊 9. 性能预估
-
-| 项目 | 预估 | 说明 |
-|------|------|------|
-| 单章文本 | ~5000 字 | 平均小说章节长度 |
-| 合成时间 | ~10-30 秒 | 取决于 GPU 性能和文本长度 |
-| 并发数 | 4-8 个 | 取决于 RTX 3070 Ti 显存 |
-| 每小时处理量 | ~100-200 章 | 4 并发下 |
-
----
-
-## ✅ 10. 验证清单
-
-- [ ] Windows 服务已启动并监听 0.0.0.0:6006
-- [ ] Mac 可以访问 Windows 服务（`curl http://192.168.x.x:6006/docs`）
-- [ ] 客户端配置了正确的服务端 IP
-- [ ] 测试文件可以成功合成音频
-- [ ] 批量处理功能正常工作
-- [ ] 音频文件可以正常播放
-
----
-
-## 🎭 11. 角色音色与情绪控制
-
-### 11.1 角色音色库系统
-
-```
-角色音色库
-├── 每个角色有唯一的 reference_audio
-├── 从 reference_audio 提取 speaker_embedding
-└── 同一个角色的所有对话使用相同的 speaker_embedding
-```
-
-**实现要点：**
-- 为每个角色录制 5-10 秒清晰朗读音频
-- 使用 IndexTTS-2 的 speaker embedding 机制保持音色一致性
-- 保存角色音色配置到 JSON 文件
-
-### 11.2 情绪控制系统
-
-**四种情绪控制方法：**
-
-| 方法 | 说明 | 适用场景 |
+| 功能 | 说明 | 详细文档 |
 |------|------|----------|
-| **方法 1：默认模式** | 从 speaker reference 提取情绪 | 保持自然情感连贯性 |
-| **方法 2：情绪参考音频** | 提供额外音频控制情绪 | 精确控制特定情绪 |
-| **方法 3：情绪向量** | 使用向量精确控制 | 技术型控制 |
-| **方法 4：文本情绪描述** | 使用文本描述情绪 | 简单快速控制 |
-
-**情绪类型定义：**
-
-```python
-class EmotionType(Enum):
-    HAPPY = "happy"           # 快乐
-    SAD = "sad"               # 悲伤
-    ANGRY = "angry"           # 愤怒
-    FEAR = "fear"             # 恐惧
-    SURPRISE = "surprise"     # 惊讶
-    NEUTRAL = "neutral"       # 中性
-    EXCITED = "excited"       # 兴奋
-    CALM = "calm"             # 平静
-    CONFIDENT = "confident"   # 自信
-    SARCASTIC = "sarcastic"   # 讽刺
-    ROMANTIC = "romantic"     # 浪漫
-```
-
-### 11.3 小说文本处理流程
-
-```
-小说文本 → 章节分割 → ┌──────────────────────────┐ → TTS 合成 → 音频合并
-                      │  编剧 Agent（剧本结构化）  │
-                      │  · 对话提取               │
-                      │  · 角色识别 & 绑定         │
-                      │  · 情绪标注               │
-                      └──────────────────────────┘
-                                    ↓
-                         结构化剧本（JSON）
-                                    ↓
-                      speaker_embedding + emotion_control
-```
-
-> 编剧 Agent 的详细设计见 [`doc/novel-audio-screenwriter-agent.md`](novel-audio-screenwriter-agent.md)
-
-**处理流程：**
-1. 按章节分割文本（客户端解析器，见 3.1 节）
-2. **编剧 Agent** 接收章节正文，输出结构化剧本：
-   - 2a. 提取对话、旁白、内心独白（支持多种对话标记格式）
-   - 2b. 识别说话人角色并绑定 `speaker_slug`
-   - 2c. 为每条话语单元标注 `emotion`（对齐 `EmotionType`）
-   - 2d. 输出 `cast_registry` + `scenes[].utterances[]`（Schema 见编剧 Agent 文档第 4 节）
-3. 由剧本中的 `speaker_id` 查表获取角色的 speaker embedding
-4. 调用 TTS 引擎合成音频
+| 小说文件解析 | TXT / EPUB / PDF 解析、编码检测、章节分割、文本清洗 | [`module-novel-parser.md`](module-novel-parser.md) |
+| 全局角色建档 | 角色发现合并、画像推断（性别/年龄/职业/性格）、关系图谱 | [`auto-character-voice-engine.md`](auto-character-voice-engine.md) |
+| 自动音色设计 | 画像→音色描述→VoiceDesign→VoiceClone 固化、模板音色池 | [`module-voice-bank.md`](module-voice-bank.md) |
+| 编剧 Agent | 对话提取、角色绑定、有声化改写、场景分割 | [`novel-audio-screenwriter-agent.md`](novel-audio-screenwriter-agent.md) |
+| 上下文情感推断 | 三层情感分析、叙述线索映射、情感弧线追踪 | [`auto-character-voice-engine.md`](auto-character-voice-engine.md) §4 |
+| 情绪控制系统 | EmotionType 定义、VAD 模型、TTS 引擎适配、情绪平滑 | [`module-emotion-system.md`](module-emotion-system.md) |
+| 语气词/副语言注入 | 笑声、叹气、喘息等 12 种副语言自动注入 | [`auto-character-voice-engine.md`](auto-character-voice-engine.md) §5 |
+| 跨章一致性校验 | 人称/风格/情感/关系/知识 五维度一致性检查 | [`auto-character-voice-engine.md`](auto-character-voice-engine.md) §6 |
+| TTS API 客户端 | Index-TTS 1.5/2 + Qwen3-TTS 多引擎、重试、降级 | [`module-tts-api-client.md`](module-tts-api-client.md) |
+| 音频处理 | 命名规范、合并、副语言拼接、后处理、M4B 有声书输出 | [`module-audio-processor.md`](module-audio-processor.md) |
+| 任务管理 | DAG 调度、并发控制、进度追踪、断点续传 | [`module-task-manager.md`](module-task-manager.md) |
+| Web UI | 图形化操作界面、角色管理、剧本编辑、任务监控、音频预览 | [`module-web-ui.md`](module-web-ui.md) |
 
 ---
 
-### 11.4 音频文件命名规范
-
-#### 11.4.1 命名格式设计原则
-
-1. **排序友好** - 文件名按字母顺序排序时，能保持逻辑顺序（章节→角色→顺序）
-2. **唯一性** - 每个音频文件有唯一标识，避免重名冲突
-3. **可读性** - 文件名包含足够的信息，便于人工识别
-4. **兼容性** - 避免特殊字符，兼容所有文件系统
-5. **引擎友好** - 便于 TTS 引擎解析和生成
-
-#### 11.4.2 命名格式
+## 3. 端到端数据流
 
 ```
-{novel_slug}-{chapter_num:04d}-{speaker_slug}-{emotion}-{seq_num:06d}.mp3
-```
-
-**字段说明：**
-
-| 字段 | 说明 | 示例 | 说明 |
-|------|------|------|------|
-| `novel_slug` | 小说名（简化） | `dragon_ball` | 去除空格和特殊字符，转为小写，下划线分隔 |
-| `chapter_num` | 章节号（4 位） | `0001` | 固定 4 位，不足补 0（支持最多 9999 章） |
-| `speaker_slug` | 角色名（简化） | `goku` | 去除特殊字符，转为小写，英文用拼音或英文名 |
-| `emotion` | 情绪类型 | `happy` | 固定英文情绪标签 |
-| `seq_num` | 全局序号（6 位） | `000001` | 章节内全局序号（包含角色对话、旁白等），支持最多 999999 条 |
-
-#### 11.4.3 文件名生成器
-
-```python
-from pathlib import Path
-from typing import NamedTuple
-from datetime import datetime
-
-class AudioFileInfo(NamedTuple):
-    """音频文件信息"""
-    novel_slug: str           # 小说名（简化）
-    chapter_num: int          # 章节号
-    speaker_slug: str         # 角色名（简化）
-    emotion: str              # 情绪类型
-    seq_num: int              # 全局序号（章节内）
-    timestamp: datetime       # 生成时间
-
-class AudioFilenameGenerator:
-    """音频文件名生成器"""
-    
-    def __init__(self, output_dir: Path):
-        self.output_dir = output_dir
-        self.output_dir.mkdir(parents=True, exist_ok=True)
-    
-    def sanitize_slug(self, text: str) -> str:
-        """简化文本为 slug
-        
-        规则：
-        1. 转为小写
-        2. 移除特殊字符（保留字母、数字、下划线）
-        3. 替换空格为下划线
-        """
-        import re
-        text = text.lower()
-        text = re.sub(r'[^a-z0-9\u4e00-\u9fa5_]', '', text)
-        text = re.sub(r'[\s]+', '_', text)
-        return text
-    
-    def generate_filename(self, info: AudioFileInfo) -> Path:
-        """生成音频文件名
-        
-        格式：{novel_slug}-{chapter_num:04d}-{speaker_slug}-{emotion}-{seq_num:06d}.mp3
-        """
-        filename = (
-            f"{info.novel_slug}-"
-            f"{info.chapter_num:04d}-"
-            f"{info.speaker_slug}-"
-            f"{info.emotion}-"
-            f"{info.seq_num:06d}.mp3"
-        )
-        return self.output_dir / filename
-    
-    def generate_full_path(self, info: AudioFileInfo) -> Path:
-        """生成完整文件路径
-        
-        格式：{output_dir}/{novel_slug}/{novel_slug}-{chapter_num:04d}-{speaker_slug}-{emotion}-{seq_num:06d}.mp3
-        """
-        novel_dir = self.output_dir / info.novel_slug
-        novel_dir.mkdir(parents=True, exist_ok=True)
-        return novel_dir / self.generate_filename(info)
-```
-
-#### 11.4.4 使用示例
-
-```python
-from pathlib import Path
-from novel_tts_design import AudioFilenameGenerator, AudioFileInfo
-from datetime import datetime
-
-# 初始化生成器
-generator = AudioFilenameGenerator(Path("output"))
-
-# 示例 1：孙悟空 - 第 1 章 - 快乐情绪 - 全局第 1 句
-info1 = AudioFileInfo(
-    novel_slug="dragon_ball",
-    chapter_num=1,
-    speaker_slug="goku",
-    emotion="happy",
-    seq_num=1,        # 全局序号
-    timestamp=datetime.now()
-)
-
-path1 = generator.generate_full_path(info1)
-print(path1)
-# 输出：output/dragon_ball/dragon_ball-0001-goku-happy-000001.mp3
-
-# 示例 2：贝吉塔 - 第 1 章 - 平静情绪 - 全局第 2 句
-info2 = AudioFileInfo(
-    novel_slug="dragon_ball",
-    chapter_num=1,
-    speaker_slug="vegeta",
-    emotion="calm",
-    seq_num=2,        # 全局序号
-    timestamp=datetime.now()
-)
-
-path2 = generator.generate_full_path(info2)
-print(path2)
-# 输出：output/dragon_ball/dragon_ball-0001-vegeta-calm-000002.mp3
-
-# 示例 3：孙悟空 - 第 1 章 - 愤怒情绪 - 全局第 3 句
-info3 = AudioFileInfo(
-    novel_slug="dragon_ball",
-    chapter_num=1,
-    speaker_slug="goku",
-    emotion="angry",
-    seq_num=3,        # 全局序号
-    timestamp=datetime.now()
-)
-
-path3 = generator.generate_full_path(info3)
-print(path3)
-# 输出：output/dragon_ball/dragon_ball-0001-goku-angry-000003.mp3
-
-# 示例 4：旁白 - 第 1 章 - 中性情绪 - 全局第 4 句
-info4 = AudioFileInfo(
-    novel_slug="dragon_ball",
-    chapter_num=1,
-    speaker_slug="narrator",  # 旁白特殊标记
-    emotion="neutral",
-    seq_num=4,        # 全局序号
-    timestamp=datetime.now()
-)
-
-path4 = generator.generate_full_path(info4)
-print(path4)
-# 输出：output/dragon_ball/dragon_ball-0001-narrator-neutral-000004.mp3
-```
-
-#### 11.4.5 文件排序效果
-
-生成的文件会按以下顺序排列：
-
-```
-dragon_ball/
-├── dragon_ball-0001-goku-happy-000001.mp3
-├── dragon_ball-0001-vegeta-calm-000002.mp3
-├── dragon_ball-0001-goku-angry-000003.mp3
-├── dragon_ball-0001-narrator-neutral-000004.mp3
-├── dragon_ball-0002-goku-happy-000001.mp3
-├── dragon_ball-0002-goku-angry-000002.mp3
-└── dragon_ball-0002-vegeta-calm-000003.mp3
-```
-
-**排序特点：**
-1. 按小说名分组
-2. 同一小说内按章节号排序
-3. 同一章节内按角色名排序
-4. **同一角色内按全局序号排序**（不是角色序号）
-
-**全局序号优势：**
-- 引擎可以按序号直接播放整个章节
-- 不需要维护每个角色的独立计数器
-- 旁白、场景描述等都可以统一编号
-
-#### 11.4.6 旁白与特殊元素处理
-
-**特殊元素类型：**
-
-| 类型 | 角色名标记 | 说明 |
-|------|------------|------|
-| 角色对话 | 角色名（如 `goku`） | 正常对话 |
-| 旁白 | `narrator` | 叙述性文字 |
-| 场景描述 | `desc` | 场景、环境描述 |
-| 内心独白 | `inner` | 角色内心活动 |
-| 音效提示 | `sfx` | 音效说明（不生成音频） |
-
-**旁白处理示例：**
-
-```python
-# 旁白使用 narrator 作为角色名
-info_narrator = AudioFileInfo(
-    novel_slug="dragon_ball",
-    chapter_num=1,
-    speaker_slug="narrator",  # 旁白特殊标记
-    emotion="neutral",
-    seq_num=4,        # 全局序号
-    timestamp=datetime.now()
-)
-
-# 场景描述使用 desc 作为角色名
-info_desc = AudioFileInfo(
-    novel_slug="dragon_ball",
-    chapter_num=1,
-    speaker_slug="desc",  # 场景描述特殊标记
-    emotion="neutral",
-    seq_num=5,        # 全局序号
-    timestamp=datetime.now()
-)
-
-# 内心独白使用 inner 作为角色名
-info_inner = AudioFileInfo(
-    novel_slug="dragon_ball",
-    chapter_num=1,
-    speaker_slug="inner",  # 内心独白特殊标记
-    emotion="sad",
-    seq_num=6,        # 全局序号
-    timestamp=datetime.now()
-)
-```
-
-**旁白音色策略：**
-
-1. **统一旁白音色** - 所有旁白使用同一个 speaker embedding
-2. **可配置** - 在音色库中为 narrator 配置专门的音色
-3. **中性情绪** - 旁白通常使用 neutral 情绪
-
----
-
-#### 11.4.7 TTS 引擎集成
-
-```python
-from tts_engine import TTSEngine
-from novel_tts_design import AudioFilenameGenerator, AudioFileInfo
-
-def synthesize_audio(
-    tts_engine: TTSEngine,
-    info: AudioFileInfo,
-    text: str,
-    speaker_embedding: torch.Tensor
-):
-    """合成音频
-    
-    1. 生成文件名
-    2. 调用 TTS 引擎合成
-    3. 返回文件路径
-    """
-    generator = AudioFilenameGenerator(Path("output"))
-    output_path = generator.generate_full_path(info)
-    
-    # 调用 TTS 引擎
-    tts_engine.synthesize(
-        text=text,
-        speaker_embedding=speaker_embedding,
-        output_path=output_path,
-        emotion=info.emotion
-    )
-    
-    return output_path
+用户上传小说文件
+    ↓
+┌─ Phase 1: 解析 ─────────────────────────────────────────────┐
+│  小说解析器 → ParseResult (metadata + chapters[])            │
+│  详见: module-novel-parser.md                                │
+└──────────────────────────────────┬───────────────────────────┘
+                                   ↓
+┌─ Phase 2: 全局角色建档 ──────────────────────────────────────┐
+│  角色发现 → 别名合并 → 画像推断 → 关系图谱                    │
+│  输出: cast_registry[] (含 profile, aliases, relationships)  │
+│  详见: auto-character-voice-engine.md §2                     │
+└──────────────────────────────────┬───────────────────────────┘
+                                   ↓
+┌─ Phase 3: 自动音色设计 ──────────────────────────────────────┐
+│  画像 → 音色描述 → VoiceDesign → VoiceClone 固化             │
+│  输出: voice_bank/{novel_slug}/ 下的音色资源                  │
+│  详见: module-voice-bank.md §6, auto-character-voice-engine.md §3│
+└──────────────────────────────────┬───────────────────────────┘
+                                   ↓
+┌─ Phase 4: 逐章剧本生成 ──────────────────────────────────────┐
+│  编剧 Agent：                                                │
+│    对话提取 → 角色绑定 → 有声化改写 → 场景分割                │
+│  角色分析引擎增强：                                           │
+│    上下文情感推断 → 语气词注入 → TTS instruct 生成            │
+│  一致性校验 → 标记异常 → 生成增强版 JSON 剧本                 │
+│  详见: novel-audio-screenwriter-agent.md, auto-character-voice-engine.md §4-6│
+└──────────────────────────────────┬───────────────────────────┘
+                                   ↓
+┌─ Phase 5: TTS 合成 ──────────────────────────────────────────┐
+│  遍历 utterances[]，携带 voice_clone_prompt + tts_instruct   │
+│  调用 Windows TTS 服务（Index-TTS / Qwen3-TTS）              │
+│  输出: output/{novel_slug}/raw/ 下的音频片段                  │
+│  详见: module-tts-api-client.md                              │
+└──────────────────────────────────┬───────────────────────────┘
+                                   ↓
+┌─ Phase 6: 音频合并与后处理 ──────────────────────────────────┐
+│  按 seq 排序拼接 → 插入副语言音效 → 插入静音停顿              │
+│  后处理: 音量标准化、淡入淡出、采样率统一                     │
+│  全书组装: 章节合并 → M4B 有声书（含元数据、章节标记）         │
+│  详见: module-audio-processor.md                             │
+└──────────────────────────────────┬───────────────────────────┘
+                                   ↓
+                          完整有声书 (.m4b / .mp3)
 ```
 
 ---
 
-## 📝 12. 后续优化方向
+## 4. 项目代码结构
 
-1. **Web UI** - 提供图形化界面
-2. **进度显示** - 实时显示处理进度
-3. **断点续传** - 支持中断后继续处理
-4. **音频后处理** - 添加淡入淡出、音量标准化
-5. **角色声线库扩展** - 支持更多角色和声线类型
-6. **自动情绪标注** - 使用 NLP 模型自动标注情绪（已由编剧 Agent 部分覆盖，见下方关联文档）
-7. **情感曲线** - 支持长文本的情感变化曲线
-8. **多角色对话合并** - 将同一场景的对话合并为场景音频（编剧 Agent 已输出 `scene` 粒度分组）
+```
+xspy/
+├── pyproject.toml                  # 项目元数据、依赖声明
+├── README.md
+├── doc/                            # 设计文档（本目录）
+│
+├── src/xspy/                       # ────── Python 主包 ──────
+│   ├── __init__.py
+│   ├── pipeline.py                 # 端到端流水线编排入口
+│   ├── cli.py                      # 命令行入口（Click / Typer）
+│   │
+│   ├── core/                       # 全局共享：配置、模型、类型
+│   │   ├── __init__.py
+│   │   ├── config.py               #   ServerConfig / TTSConfig / AppConfig
+│   │   ├── models.py               #   Chapter / NovelMetadata / ParseResult
+│   │   └── types.py                #   EmotionType / TaskType / TaskStatus
+│   │
+│   ├── parser/                     # 小说解析器
+│   │   ├── __init__.py             #   → module-novel-parser.md
+│   │   ├── base.py                 #   BaseParser 抽象基类
+│   │   ├── txt.py                  #   TXTParser
+│   │   ├── epub.py                 #   EPUBParser
+│   │   ├── pdf.py                  #   PDFParser
+│   │   ├── splitter.py             #   ChapterSplitter（章节分割引擎）
+│   │   ├── encoding.py             #   EncodingDetector
+│   │   ├── cleaner.py              #   TextCleaner
+│   │   └── factory.py              #   ParserFactory
+│   │
+│   ├── agent/                      # LLM Agent 层
+│   │   ├── __init__.py
+│   │   ├── screenwriter/           #   编剧 Agent
+│   │   │   ├── __init__.py         #   → novel-audio-screenwriter-agent.md
+│   │   │   ├── agent.py            #     ScreenwriterAgent 主逻辑
+│   │   │   ├── prompts.py          #     系统提示词模板
+│   │   │   └── schema.py           #     剧本 JSON Schema 定义与校验
+│   │   └── character/              #   角色分析引擎
+│   │       ├── __init__.py         #   → auto-character-voice-engine.md
+│   │       ├── discovery.py        #     角色发现与别名合并
+│   │       ├── profiler.py         #     角色画像推断（性别/年龄/职业/性格）
+│   │       ├── relationship.py     #     角色关系图谱构建
+│   │       ├── consistency.py      #     跨章一致性校验
+│   │       └── paraverbal.py       #     语气词/副语言注入
+│   │
+│   ├── emotion/                    # 情绪控制系统
+│   │   ├── __init__.py             #   → module-emotion-system.md
+│   │   ├── types.py                #   EmotionType 枚举（从 core/types.py re-export）
+│   │   ├── detail.py               #   EmotionDetail 数据模型
+│   │   ├── rules.py                #   NarrationRuleEngine（叙述线索规则）
+│   │   ├── smoother.py             #   EmotionSmoother（情绪平滑器）
+│   │   ├── audio_library.py        #   EmotionAudioLibrary（情绪参考音频）
+│   │   └── adapter/                #   TTS 引擎情绪适配器
+│   │       ├── __init__.py
+│   │       ├── base.py             #     EmotionAdapter 抽象基类
+│   │       ├── qwen.py             #     QwenTTSEmotionAdapter
+│   │       └── index_tts.py        #     IndexTTSEmotionAdapter
+│   │
+│   ├── voice/                      # 角色音色库
+│   │   ├── __init__.py             #   → module-voice-bank.md
+│   │   ├── bank.py                 #   VoiceBankManager（音色库管理器）
+│   │   ├── registry.py             #   VoiceRegistry（注册表读写）
+│   │   ├── generator.py            #   VoiceGenerator（自动音色生成）
+│   │   ├── similarity.py           #   SimilarityChecker（区分度校验）
+│   │   └── templates.py            #   TemplatePool（模板音色池）
+│   │
+│   ├── tts/                        # TTS API 客户端
+│   │   ├── __init__.py             #   → module-tts-api-client.md
+│   │   ├── base.py                 #   BaseTTSClient 抽象基类
+│   │   ├── index_v1.py             #   IndexTTSClient（1.0 / 1.5）
+│   │   ├── index_v2.py             #   IndexTTSV2Client
+│   │   ├── qwen.py                 #   QwenTTSClient
+│   │   ├── factory.py              #   TTSClientFactory
+│   │   ├── retry.py                #   RetryManager
+│   │   └── health.py               #   HealthChecker
+│   │
+│   ├── audio/                      # 音频处理器
+│   │   ├── __init__.py             #   → module-audio-processor.md
+│   │   ├── naming.py               #   FilenameGenerator（文件命名）
+│   │   ├── merger.py               #   AudioMerger（章节合并）
+│   │   ├── splicer.py              #   ParaverbalSplicer（副语言拼接）
+│   │   ├── post_process.py         #   PostProcessor（音量/淡入淡出）
+│   │   └── assembler.py            #   BookAssembler（M4B 组装）
+│   │
+│   ├── task/                       # 任务管理器
+│   │   ├── __init__.py             #   → module-task-manager.md
+│   │   ├── models.py               #   Task / ProcessingPlan
+│   │   ├── queue.py                #   TaskQueue（DAG 调度）
+│   │   ├── worker.py               #   WorkerPool（线程池）
+│   │   ├── progress.py             #   ProgressTracker + CLIProgress
+│   │   ├── checkpoint.py           #   CheckpointManager（断点续传）
+│   │   └── planner.py              #   PlanGenerator（计划生成器）
+│   │
+│   └── web/                        # Web UI 后端
+│       ├── __init__.py             #   → module-web-ui.md
+│       ├── app.py                  #   FastAPI 主入口
+│       ├── deps.py                 #   依赖注入
+│       ├── routes/                 #   REST API 路由
+│       │   ├── __init__.py
+│       │   ├── novels.py
+│       │   ├── characters.py
+│       │   ├── voices.py
+│       │   ├── scripts.py
+│       │   ├── tasks.py
+│       │   └── audio.py
+│       └── ws/                     #   WebSocket
+│           ├── __init__.py
+│           └── progress.py
+│
+├── frontend/                       # ────── Vue 3 前端 ──────
+│   ├── package.json
+│   ├── vite.config.ts
+│   └── src/
+│       ├── views/                  #   页面组件
+│       │   ├── NovelList.vue
+│       │   ├── NovelDetail.vue
+│       │   ├── CharacterPanel.vue
+│       │   ├── VoiceBank.vue
+│       │   ├── ScriptEditor.vue
+│       │   ├── TaskMonitor.vue
+│       │   └── AudioPlayer.vue
+│       ├── components/             #   通用组件
+│       │   ├── CharacterCard.vue
+│       │   ├── EmotionBadge.vue
+│       │   ├── WaveformPlayer.vue
+│       │   ├── ProgressBar.vue
+│       │   └── RelationGraph.vue
+│       ├── stores/                 #   Pinia 状态管理
+│       │   ├── novel.ts
+│       │   ├── character.ts
+│       │   └── task.ts
+│       └── api/
+│           └── client.ts
+│
+├── resources/                      # ────── 静态资源 ──────
+│   ├── sfx/                        #   副语言音效库
+│   │   ├── laughter/
+│   │   │   ├── male_hearty.wav
+│   │   │   ├── male_chuckle.wav
+│   │   │   ├── female_giggle.wav
+│   │   │   └── female_chuckle.wav
+│   │   ├── sigh/
+│   │   ├── gasp/
+│   │   ├── sobbing/
+│   │   └── ...
+│   ├── emotion_audio/              #   情绪参考音频（用于 Index-TTS）
+│   │   ├── happy/
+│   │   │   ├── low.wav
+│   │   │   ├── medium.wav
+│   │   │   └── high.wav
+│   │   ├── sad/
+│   │   └── ...
+│   └── voice_templates/            #   龙套模板音色
+│       ├── male_child.wav
+│       ├── male_young.wav
+│       ├── male_middle.wav
+│       ├── female_child.wav
+│       ├── female_young.wav
+│       └── ...
+│
+├── data/                           # ────── 运行时数据（.gitignore） ──────
+│   ├── voice_bank/                 #   角色音色库存储
+│   │   └── {novel_slug}/
+│   │       ├── voice_registry.json
+│   │       ├── narrator/
+│   │       ├── {character_slug}/
+│   │       └── ...
+│   ├── output/                     #   音频输出
+│   │   └── {novel_slug}/
+│   │       ├── raw/ch0001/
+│   │       ├── chapters/
+│   │       └── audiobook/
+│   ├── scripts/                    #   编剧 Agent 输出的剧本 JSON
+│   │   └── {novel_slug}/
+│   │       ├── novel_profile.json
+│   │       ├── ch0001.json
+│   │       └── ...
+│   ├── checkpoints/                #   断点续传状态
+│   └── cache/                      #   LLM 响应缓存
+│
+├── tests/                          # ────── 测试 ──────
+│   ├── conftest.py
+│   ├── fixtures/                   #   测试用小说片段、音频样本
+│   ├── test_parser/
+│   ├── test_agent/
+│   ├── test_emotion/
+│   ├── test_voice/
+│   ├── test_tts/
+│   ├── test_audio/
+│   └── test_task/
+│
+├── scripts/                        # ────── 工具脚本 ──────
+│   ├── setup_windows_tts.sh        #   Windows TTS 服务端一键部署
+│   └── download_models.sh          #   模型权重下载
+│
+└── novel/                          # ────── 小说文件存放 ──────
+    └── ...
+```
 
----
+### 4.1 结构设计原则
 
-## 📎 13. 关联文档
-
-| 文档 | 说明 |
+| 原则 | 说明 |
 |------|------|
-| [`doc/novel-audio-screenwriter-agent.md`](novel-audio-screenwriter-agent.md) | 有声书编剧 Agent 设计：剧本结构化、角色表、情绪标注、输出 Schema |
-| [`doc/index-tts-vllm-deployment.md`](index-tts-vllm-deployment.md) | Index-TTS vLLM 部署指南 |
+| **src-layout** | 使用 `src/xspy/` 布局，避免导入歧义，符合 Python 打包最佳实践 |
+| **模块自治** | 每个子包（`parser/`、`tts/`、`voice/`…）内聚，有独立的 `__init__.py` 导出公共接口 |
+| **共享上提** | 跨模块共用的类型（`EmotionType`）、模型（`Chapter`）、配置统一放在 `core/` |
+| **资源分离** | 静态资源（音效、模板）放 `resources/`，运行时产物放 `data/`（gitignore） |
+| **前后端分离** | Python 后端在 `src/xspy/web/`，Vue 前端在 `frontend/`，独立构建 |
+| **agent 分组** | 编剧 Agent 和角色分析引擎都是 LLM 驱动的，统一放在 `agent/` 下作为子包 |
 
-> **变更同步提醒：** 若本文档的 `EmotionType`（11.2 节）或音频命名规范（11.4 节）发生变更，需同步更新编剧 Agent 文档的第 3、4、7 节。
+### 4.2 模块导入路径
 
-## 14. 参考资料
+```python
+# 小说解析
+from xspy.parser import ParserFactory
+from xspy.parser.txt import TXTParser
+
+# 编剧 Agent
+from xspy.agent.screenwriter import ScreenwriterAgent
+
+# 角色分析
+from xspy.agent.character import CharacterDiscovery, CharacterProfiler
+
+# 情绪系统
+from xspy.emotion import EmotionDetail, EmotionType
+from xspy.emotion.adapter.qwen import QwenTTSEmotionAdapter
+
+# 音色库
+from xspy.voice import VoiceBankManager, VoiceGenerator
+
+# TTS 客户端
+from xspy.tts import TTSClientFactory
+from xspy.tts.qwen import QwenTTSClient
+
+# 音频处理
+from xspy.audio import AudioMerger, BookAssembler
+
+# 任务管理
+from xspy.task import TaskQueue, WorkerPool, CheckpointManager
+
+# 流水线
+from xspy.pipeline import NovelTTSPipeline
+```
+
+---
+
+## 5. 模块索引
+
+### 4.1 核心处理模块
+
+| # | 模块 | 文档 | 运行端 | 简述 |
+|---|------|------|--------|------|
+| 1 | 小说解析器 | [`module-novel-parser.md`](module-novel-parser.md) | Mac | TXT/EPUB/PDF 解析、编码检测、章节分割、文本清洗 |
+| 2 | 编剧 Agent | [`novel-audio-screenwriter-agent.md`](novel-audio-screenwriter-agent.md) | Mac (LLM) | 对话提取、角色绑定、有声化改写、场景分割、剧本 JSON 输出 |
+| 3 | 角色分析引擎 | [`auto-character-voice-engine.md`](auto-character-voice-engine.md) | Mac (LLM) | 角色发现合并、画像推断、关系图谱、情感推断、语气词注入、一致性校验 |
+| 4 | 情绪控制系统 | [`module-emotion-system.md`](module-emotion-system.md) | Mac + Win | EmotionType 定义、VAD 模型、引擎适配、规则推断、平滑 |
+| 5 | 角色音色库 | [`module-voice-bank.md`](module-voice-bank.md) | Mac + Win | 音色注册、自动生成、固化存储、模板池、区分度校验 |
+| 6 | TTS API 客户端 | [`module-tts-api-client.md`](module-tts-api-client.md) | Mac → Win | Index-TTS/Qwen3-TTS 多引擎封装、重试、降级 |
+| 7 | 音频处理器 | [`module-audio-processor.md`](module-audio-processor.md) | Mac | 命名规范、合并、副语言拼接、后处理、M4B 组装 |
+
+### 4.2 基础设施模块
+
+| # | 模块 | 文档 | 运行端 | 简述 |
+|---|------|------|--------|------|
+| 8 | 任务管理器 | [`module-task-manager.md`](module-task-manager.md) | Mac | DAG 调度、并发、进度、断点续传 |
+| 9 | Web UI | [`module-web-ui.md`](module-web-ui.md) | Mac | Vue 3 前端 + FastAPI 后端，全流程图形化操作 |
+
+### 4.3 部署与运维
+
+| # | 文档 | 简述 |
+|---|------|------|
+| 10 | [`index-tts-vllm-deployment.md`](index-tts-vllm-deployment.md) | Windows 端 Index-TTS vLLM 部署指南 |
+
+### 4.4 分析与调研
+
+| # | 文档 | 简述 |
+|---|------|------|
+| 11 | [`TTS项目借鉴分析报告.md`](TTS项目借鉴分析报告.md) | ebook2audiobook / easyVoice / Bark / Qwen3-TTS 对比分析 |
+| 12 | [`tts-open-source-analysis.md`](tts-open-source-analysis.md) | 开源 TTS 项目分析 |
+
+---
+
+## 5. 技术选型总览
+
+### 5.1 核心技术栈
+
+| 层 | 技术 | 用途 |
+|-----|------|------|
+| LLM 推理 | Qwen3.5-35B-A3B Q8 + mlx_lm | 编剧 Agent、角色分析、情感推断 |
+| TTS 推理 | Index-TTS 1.5 / Qwen3-TTS + vLLM | 语音合成 |
+| 后端框架 | Python + FastAPI | Web API、任务调度 |
+| 前端框架 | Vue 3 + TypeScript + Element Plus | Web UI |
+| 音频处理 | pydub + ffmpeg | 剪辑、合并、格式转换 |
+
+### 5.2 文本解析依赖
+
+| 库 | 用途 | 详见 |
+|-----|------|------|
+| `chardet` | 编码检测 | [`module-novel-parser.md`](module-novel-parser.md) §5.1 |
+| `ebooklib` | EPUB 解析 | [`module-novel-parser.md`](module-novel-parser.md) §6 |
+| `PyPDF2` / `pdfplumber` | PDF 解析 | [`module-novel-parser.md`](module-novel-parser.md) §7 |
+| `beautifulsoup4` + `lxml` | HTML 内容提取 | [`module-novel-parser.md`](module-novel-parser.md) §6 |
+
+### 5.3 TTS 引擎
+
+| 引擎 | 优势 | 音色克隆 | 情感控制 | 详见 |
+|------|------|----------|---------|------|
+| Index-TTS 1.5 | 中文优化、质量高 | ✅ | 有限 | [`module-tts-api-client.md`](module-tts-api-client.md) §5 |
+| IndexTTS-2 | 多语言、情绪参考音频 | ✅ | ✅ | [`module-tts-api-client.md`](module-tts-api-client.md) §5.2 |
+| Qwen3-TTS | VoiceDesign、instruct 自然语言控制 | ✅ (3秒) | ✅ (instruct) | [`module-tts-api-client.md`](module-tts-api-client.md) §6 |
+
+---
+
+## 6. 音频文件命名规范
+
+```
+{novel_slug}-{chapter_num:04d}-{speaker_slug}-{emotion}-{seq_num:06d}.wav
+```
+
+| 字段 | 位数 | 示例 | 说明 |
+|------|------|------|------|
+| `novel_slug` | 可变 | `silent_bookstore` | 小说 ASCII 简称 |
+| `chapter_num` | 4 | `0001` | 章节号 |
+| `speaker_slug` | 可变 | `linwan` / `narrator` | 角色 slug |
+| `emotion` | 可变 | `happy` | 主情绪标签 |
+| `seq_num` | 6 | `000001` | 章节内全局序号 |
+
+特殊标记：`narrator`（旁白）、`desc`（场景描述）、`inner_{slug}`（内心独白）、`sfx`（音效）
+
+> 完整命名规范、目录结构、生成器实现详见 [`module-audio-processor.md`](module-audio-processor.md) §3
+
+---
+
+## 7. 情绪类型定义
+
+全系统统一使用的情绪枚举（20 种）：
+
+| 基础情绪 | 扩展情绪 |
+|----------|----------|
+| `happy` 快乐 | `excited` 兴奋 |
+| `sad` 悲伤 | `calm` 平静 |
+| `angry` 愤怒 | `confident` 自信 |
+| `fear` 恐惧 | `sarcastic` 讽刺 |
+| `surprise` 惊讶 | `romantic` 浪漫 |
+| `disgust` 厌恶 | `anxious` 焦虑 |
+| `neutral` 中性 | `nostalgic` 怀旧 |
+| | `grief` 悲痛 |
+| | `contempt` 蔑视 |
+| | `gentle` 温柔 |
+| | `cold` 冷漠 |
+| | `resigned` 无奈 |
+| | `proud` 骄傲 |
+
+> 完整的 EmotionType 定义、VAD 模型、引擎适配详见 [`module-emotion-system.md`](module-emotion-system.md)
+
+---
+
+## 8. 性能预估
+
+| 阶段 | 预估耗时 | 并发 | 瓶颈 |
+|------|----------|------|------|
+| 小说解析 | 1-5 秒 | 1 | CPU |
+| 角色分析 | 30-120 秒 | 1 | LLM |
+| 音色设计 | 角色数 × 10-30 秒 | 1 | TTS GPU |
+| 剧本生成 | 每章 10-30 秒 | 2-4 | LLM |
+| TTS 合成 | 每句 2-10 秒 | 2-4 | GPU |
+| 音频合并 | 每章 1-3 秒 | 4-8 | CPU |
+| 后处理 | 每章 1-2 秒 | 4-8 | CPU |
+
+**全书预估**（以 50 章、每章 100 句为例）：
+
+| 指标 | 预估 |
+|------|------|
+| 总 TTS 合成 | 5000 句 |
+| TTS 合成总时间 | ~2.5-7 小时（4 并发） |
+| 全流程总时间 | ~3-8 小时 |
+| 输出有声书时长 | ~15-25 小时 |
+
+---
+
+## 9. 验证清单
+
+### 9.1 基础设施
+
+- [ ] Windows TTS 服务已启动并监听 `0.0.0.0:6006`
+- [ ] Mac 可访问 Windows 服务（`curl http://192.168.x.x:6006/docs`）
+- [ ] Mac LLM 可正常推理（Qwen3.5-35B via mlx_lm）
+
+### 9.2 模块功能
+
+- [ ] 小说解析器：TXT/EPUB/PDF 各一个文件成功解析并分章
+- [ ] 角色分析引擎：自动识别角色、推断画像、构建关系图
+- [ ] 音色库：自动为主角生成音色，不同角色音色有区分度
+- [ ] 编剧 Agent：输出合法的结构化 JSON 剧本
+- [ ] 情绪系统：情绪标签全部在合法枚举内，无突兀跳跃
+- [ ] 语气词注入：笑声、叹气等在合适位置注入
+- [ ] TTS 合成：单句音频质量可接受，情绪可感知
+- [ ] 音频合并：章节音频连续、停顿自然、音量均匀
+- [ ] 任务管理：进度显示准确，中断后可断点续传
+- [ ] Web UI：上传→处理→预览→导出 全流程可走通
+
+### 9.3 端到端
+
+- [ ] 上传一本完整小说（>10 章），全自动跑完
+- [ ] 输出 M4B 有声书可在 Apple Books 正常播放（含章节标记）
+- [ ] 不同角色音色可区分，情绪变化可感知
+
+---
+
+## 10. 文档变更同步规则
+
+以下字段/定义如有变更，需同步更新所有关联文档：
+
+| 变更项 | 影响文档 |
+|--------|----------|
+| `EmotionType` 枚举 | `module-emotion-system.md`、`novel-audio-screenwriter-agent.md`、`auto-character-voice-engine.md` |
+| 音频命名规范 | `module-audio-processor.md`、`novel-audio-screenwriter-agent.md` |
+| `cast_registry` Schema | `novel-audio-screenwriter-agent.md`、`auto-character-voice-engine.md`、`module-voice-bank.md` |
+| `utterance` Schema | `novel-audio-screenwriter-agent.md`、`auto-character-voice-engine.md`、`module-audio-processor.md` |
+| TTS API 端点 | `module-tts-api-client.md`、`index-tts-vllm-deployment.md` |
+
+---
+
+## 11. 参考资料
+
 1. https://github.com/DrewThomasson/ebook2audiobookSTYLETTS2
 2. https://github.com/cosin2077/easyVoice
 3. https://github.com/suno-ai/bark
 4. https://github.com/QwenLM/Qwen3-TTS
+5. https://github.com/Ksuriuri/index-tts-vllm
