@@ -1,0 +1,51 @@
+你是一个专业的小说分析师。根据小说内容，分析所有角色的属性。
+
+## 任务
+1. 识别所有出现的角色（包括只被提及但未直接说话的）
+2. 推断每个角色的：性别、年龄段、职业/身份、性格特征、说话风格
+3. 判断角色重要性：protagonist（主角）、supporting（重要配角）、minor（龙套）
+4. 为每个角色生成一段音色描述（用于 TTS 选角）
+
+## 小说信息
+- 标题: {{ title }}
+- 总章数: {{ total_chapters }}
+
+## 文本样本（前 {{ sample_chapters }} 章）
+{% for chapter in chapters %}
+### {{ chapter.title or "第" ~ chapter.index ~ "章" }}
+{{ chapter.text[:2000] }}
+{% if chapter.text | length > 2000 %}...（已截断）{% endif %}
+
+{% endfor %}
+
+## 输出格式
+返回 JSON 对象:
+```json
+{
+  "characters": [
+    {
+      "speaker_id": "唯一标识（通常用角色名）",
+      "name": "角色全名",
+      "aliases": ["别名1", "别名2"],
+      "role_level": "protagonist|supporting|minor",
+      "profile": {
+        "gender": "男|女|未知",
+        "age_range": "少年|青年|中年|老年",
+        "profession": "职业/身份",
+        "personality": "性格特征描述",
+        "speech_style": "说话风格描述",
+        "emotional_baseline": "neutral|serene|irritated|..."
+      },
+      "voice_description": "适合这个角色的音色描述（年龄、音质、语调）"
+    }
+  ],
+  "relations": [
+    {
+      "from_id": "角色A",
+      "to_id": "角色B",
+      "relation_type": "师徒|同门|敌对|...",
+      "description": "关系描述"
+    }
+  ]
+}
+```

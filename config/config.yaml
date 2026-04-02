@@ -1,0 +1,36 @@
+env: development
+log_level: INFO
+data_dir: data
+
+tts:
+  preferred_engine: index-tts
+  base_url: "http://192.168.1.100:7860"
+  timeout_seconds: 60
+  max_retries: 3
+  concurrent_requests: 4
+
+llm:
+  default_model: qwen3.5-local
+  models_file: config/llm_models.json
+  cache_dir: data/cache/llm
+  allow_live: true
+
+audio:
+  sample_rate: 24000
+  bit_depth: 16
+  channels: 1
+  normalization_lufs: -16.0
+  dialogue_silence_ms: 300
+  narration_silence_ms: 500
+
+pipeline:
+  concurrency_limit: 4
+  checkpoint_dir: data/checkpoints
+  intermediate_dir: data/intermediate
+  output_dir: data/output
+
+web:
+  host: "0.0.0.0"
+  port: 8080
+  cors_origins:
+    - "http://localhost:5173"

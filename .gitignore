@@ -78,6 +78,13 @@ htmlcov/
 .ipynb_checkpoints
 *.ipynb_checkpoints/
 
+# xspy runtime data
+data/
+*.wav
+*.m4b
+*.mp3
+*.flac
+
 # 系统生成
 Thumbs.db
 ehthumbs.db

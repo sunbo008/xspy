@@ -1,0 +1,76 @@
+{
+  "_meta": {
+    "module": "character",
+    "schema_version": "0.1.0",
+    "timestamp": "2026-03-30T12:01:00",
+    "trace_id": "test_trace_001"
+  },
+  "data": {
+    "characters": [
+      {
+        "speaker_id": "林凡",
+        "name": "林凡",
+        "aliases": [],
+        "role_level": "protagonist",
+        "profile": {
+          "gender": "男",
+          "age_range": "青年",
+          "profession": "外门弟子",
+          "personality": "坚韧沉稳，内敛而有锋芒",
+          "speech_style": "平淡从容，关键时刻语气坚定",
+          "emotional_baseline": "serene",
+          "confidence": 0.9
+        },
+        "voice_description": "青年男声，音色清朗，语速适中，给人沉稳可靠感"
+      },
+      {
+        "speaker_id": "陈威",
+        "name": "陈威",
+        "aliases": [],
+        "role_level": "minor",
+        "profile": {
+          "gender": "男",
+          "age_range": "青年",
+          "profession": "内门弟子",
+          "personality": "嚣张跋扈，好勇斗狠",
+          "speech_style": "语气强硬傲慢",
+          "emotional_baseline": "irritated",
+          "confidence": 0.7
+        },
+        "voice_description": "青年男声，音色粗犷，语调高昂带攻击性"
+      },
+      {
+        "speaker_id": "张长老",
+        "name": "张长老",
+        "aliases": [],
+        "role_level": "supporting",
+        "profile": {
+          "gender": "男",
+          "age_range": "老年",
+          "profession": "宗门长老",
+          "personality": "沉稳老练，心思缜密",
+          "speech_style": "语气平和中带威严",
+          "emotional_baseline": "serene",
+          "confidence": 0.8
+        },
+        "voice_description": "中老年男声，音色低沉浑厚，语速缓慢带权威感"
+      },
+      {
+        "speaker_id": "云梦",
+        "name": "云梦",
+        "aliases": ["梦儿"],
+        "role_level": "supporting",
+        "profile": {
+          "gender": "女",
+          "age_range": "青年",
+          "profession": "长老弟子",
+          "personality": "温柔细心，恭敬有礼",
+          "speech_style": "轻声细语，恭敬柔和",
+          "emotional_baseline": "serene",
+          "confidence": 0.8
+        },
+        "voice_description": "青年女声，音色柔美清澈，语调温和"
+      }
+    ]
+  }
+}
